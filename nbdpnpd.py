@@ -2,29 +2,77 @@
 from __future__ import annotations
 
 import argparse
+import configparser
+import json
 import logging
 import os
 import pyudev
+import re
 import select
 import signal
 import socket
 import subprocess
 import threading
 import time
+from dataclasses import dataclass
 from typing import Dict, Optional
 
-from nbdpnp_common import (
-    ExportState,
-    now_ts,
-    parse_section_name,
-    path_for_device,
-    read_config,
-    recv_json_line,
-    send_json_line,
-    setup_logging,
-)
-
 LOG = logging.getLogger("nbdpnpd")
+
+
+# Moved from nbdpnp_common.py
+def setup_logging(level: str = "INFO") -> None:
+    numeric = getattr(logging, level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=numeric,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+
+def read_config(path: str) -> configparser.ConfigParser:
+    parser = configparser.ConfigParser(interpolation=None)
+    with open(path, "r", encoding="utf-8") as fh:
+        parser.read_file(fh)
+    return parser
+
+
+def send_json_line(fp, payload: dict) -> None:
+    data = (json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+    fp.write(data)
+    fp.flush()
+
+
+def recv_json_line(fp) -> Optional[dict]:
+    if fp is None:
+        return None
+    line = fp.readline()
+    if not line:
+        return None
+    return json.loads(line.decode("utf-8"))
+
+
+def path_for_device(device: str) -> str:
+    if device.startswith("/dev/"):
+        return device
+    return f"/dev/{device}"
+
+
+def now_ts() -> float:
+    return time.time()
+
+
+def parse_section_name(name: str) -> tuple[str, str]:
+    m = re.match(r'^(?P<kind>[A-Za-z0-9_-]+)\s+"(?P<name>.*)"$', name.strip())
+    if not m:
+        raise ValueError(f"Invalid section name: {name!r}")
+    return m.group("kind"), m.group("name")
+
+
+@dataclass
+class ExportState:
+    name: str
+    device: str
+    present: bool = False
 
 
 def media_present(device: str) -> bool:
