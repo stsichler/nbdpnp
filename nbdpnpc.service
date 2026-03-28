@@ -1,0 +1,15 @@
+[Unit]
+Description=NBD Plug-and-play Client
+After=network-online.target udev.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nbdpnpc -c /etc/nbdpnpc.conf
+Restart=always
+RestartSec=2
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

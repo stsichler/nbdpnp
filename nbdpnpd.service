@@ -1,0 +1,15 @@
+[Unit]
+Description=NBD Plug-and-play Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nbdpnpd -c /etc/nbdpnpd.conf
+Restart=always
+RestartSec=2
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

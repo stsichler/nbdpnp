@@ -1,0 +1,21 @@
+# nbdpnpc.conf
+[DEFAULT]
+log_level = INFO
+
+[server "main"]
+host = 192.168.1.10
+port = 10800
+retry_interval = 10
+device_ready_timeout = 10
+
+[subscription "main_dvd0"]
+server = main
+export = dvd0
+mountpoint = /media/dvd0
+auto_mount = yes
+
+[subscription "main_dvd1"]
+server = main
+export = dvd1
+mountpoint = /media/dvd1
+auto_mount = yes
