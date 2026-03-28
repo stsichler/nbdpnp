@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/nbdpnpc -c /etc/nbdpnpc.conf
+ExecStart=/usr/local/bin/nbdpnpc.py -c /etc/nbdpnpc.conf
 Restart=always
 RestartSec=2
 User=root
