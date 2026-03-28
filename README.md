@@ -10,12 +10,16 @@ This is achieved through two Python 3 services:
 
 ## Files
 
+### Server Side
+
 - `nbdpnpd.py`
-- `nbdpnpc.py`
-- `nbdpnp_common.py`
 - `nbdpnpd.conf.example`
-- `nbdpnpc.conf.example`
 - `nbdpnpd.service`
+
+### Client Side
+
+- `nbdpnpc.py`
+- `nbdpnpc.conf.example`
 - `nbdpnpc.service`
 
 ## Runtime dependencies
