@@ -29,6 +29,7 @@ This is achieved through two Python 3 services:
 
 ## Notes
 
+- Currently there is no authentication or encryption support, so this is only useful for LANs.
 - The protocol is newline-delimited JSON over TCP.
 - The client periodically reconnects when a server is offline.
 - The client searches the next free `/dev/nbdX` dynamically for each active export.
