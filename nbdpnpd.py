@@ -10,6 +10,7 @@ import pyudev
 import re
 import select
 import signal
+import shutil
 import socket
 import subprocess
 import threading
@@ -57,6 +58,28 @@ def path_for_device(device: str) -> str:
     return f"/dev/{device}"
 
 
+def ensure_nbd_module_loaded() -> None:
+    if os.path.exists("/sys/module/nbd"):
+        LOG.debug("NBD kernel module already loaded")
+        return
+
+    if not shutil.which("modprobe"):
+        LOG.warning("modprobe not found; cannot load nbd kernel module")
+        return
+
+    try:
+        subprocess.run(
+            ["modprobe", "nbd"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        LOG.info("Loaded nbd kernel module")
+    except Exception as exc:
+        LOG.warning("Failed to load nbd kernel module: %s", exc)
+
+
 def now_ts() -> float:
     return time.time()
 
@@ -72,6 +95,7 @@ def parse_section_name(name: str) -> tuple[str, str]:
 class ExportState:
     name: str
     device: str
+    port: int = 10809
     present: bool = False
 
 
@@ -183,6 +207,7 @@ class ClientConnection:
                 {
                     "export": name,
                     "device": self.server.exports[name].device,
+                    "port": self.server.exports[name].port,
                     "present": self.server.exports[name].present,
                     "timestamp": now_ts(),
                 }
@@ -236,9 +261,10 @@ class NbdPnpdServer:
             if not device:
                 raise ValueError(f"Missing device in section {section!r}")
             device = path_for_device(device)
+            port = self.config.getint(section, "port", fallback=10809)
             present = media_present(device)
-            self.exports[name] = ExportState(name=name, device=device, present=present)
-            LOG.info("Configured export %s -> %s (present=%s)", name, device, present)
+            self.exports[name] = ExportState(name=name, device=device, port=port, present=present)
+            LOG.info("Configured export %s -> %s (port=%s present=%s)", name, device, port, present)
 
     def register_client(self, client: ClientConnection) -> None:
         with self.clients_lock:
@@ -253,6 +279,7 @@ class NbdPnpdServer:
             "type": "change",
             "export": export.name,
             "device": export.device,
+            "port": export.port,
             "present": export.present,
             "timestamp": now_ts(),
         }
@@ -356,6 +383,8 @@ def main() -> int:
     cfg = read_config(args.config)
     log_level = args.log_level or cfg.get("global", "log_level", fallback="INFO")
     setup_logging(log_level)
+
+    ensure_nbd_module_loaded()
 
     server = NbdPnpdServer(args.config)
 

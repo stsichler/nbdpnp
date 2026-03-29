@@ -25,11 +25,19 @@ This is achieved through two Python 3 services:
 ## Runtime dependencies
 
 - Python 3
-- `pyudev` (on the server side)
+
+### Server Side
+
+- `pyudev`
+- `udevadm` from `udev`
+
+### Client Side
+
 - `nbd-client`
-- `udisksctl` from UDisks2
+- `udisksctl` from `udisks2`
+- `modprobe`
 - `mount`, `umount`
-- `udevadm`
+- `udevadm` from `udev`
 
 ## Notes
 

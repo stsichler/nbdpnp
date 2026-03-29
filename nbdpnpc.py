@@ -158,6 +158,22 @@ def path_for_device(device: str) -> str:
     return f"/dev/{device}"
 
 
+def ensure_nbd_module_loaded() -> None:
+    if os.path.exists("/sys/module/nbd"):
+        LOG.debug("NBD kernel module already loaded")
+        return
+
+    if not shutil.which("modprobe"):
+        LOG.warning("modprobe not found; cannot load nbd kernel module")
+        return
+
+    try:
+        run_cmd(["modprobe", "nbd"], check=True, capture_output=True, text=True, timeout=30)
+        LOG.info("Loaded nbd kernel module")
+    except Exception as exc:
+        LOG.warning("Failed to load nbd kernel module: %s", exc)
+
+
 def now_ts() -> float:
     return time.time()
 
@@ -313,21 +329,19 @@ def cleanup_subscription(sub: SubscriptionState) -> None:
 
 def nbd_connect(host: str, port: int, device: str, export: str) -> None:
     device = path_for_device(device)
-    commands = [
-        ["nbd-client", "-N", export, host, device],
-    ]
-    last_exc: Optional[Exception] = None
-    for cmd in commands:
-        try:
-            LOG.info("Connecting %s to %s:%s export %s", device, host, port, export)
-            result = run_cmd(cmd, check=True, capture_output=True, text=True, timeout=60)
-            if result.stdout.strip():
-                LOG.debug("nbd-client output: %s", result.stdout.strip())
-            return
-        except Exception as exc:
-            last_exc = exc
-            continue
-    raise RuntimeError(f"Failed to connect {device} to {host}:{port}/{export}: {last_exc}")
+    try:
+        LOG.info("Connecting %s to %s:%s export %s", device, host, port, export)
+        result = run_cmd(
+            ["nbd-client", "-N", export, host, str(port), device],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.stdout.strip():
+            LOG.debug("nbd-client output: %s", result.stdout.strip())
+    except Exception as exc:
+        raise RuntimeError(f"Failed to connect {device} to {host}:{port}/{export}: {exc}") from exc
 
 
 def nbd_disconnect(device: Optional[str]) -> None:
@@ -449,7 +463,11 @@ class RemoteServerWorker:
             export = item.get("export")
             present = bool(item.get("present", False))
             if export in self.subscriptions:
-                self.apply_state(self.subscriptions[export], present)
+                sub = self.subscriptions[export]
+                item_port = item.get("port")
+                if isinstance(item_port, int) and item_port > 0:
+                    sub.port = item_port
+                self.apply_state(sub, present)
 
         self.sock.settimeout(None)
 
@@ -498,7 +516,10 @@ class RemoteServerWorker:
             return
         present = bool(msg.get("present", False))
         sub = self.subscriptions[export]
-        LOG.info("Received change for %s/%s: present=%s", self.name, export, present)
+        msg_port = msg.get("port")
+        if isinstance(msg_port, int) and msg_port > 0:
+            sub.port = msg_port
+        LOG.info("Received change for %s/%s: present=%s, port=%s", self.name, export, present, sub.port)
         if present:
             self.ensure_present(sub)
         else:
@@ -637,6 +658,8 @@ def main() -> int:
     cfg = read_config(args.config)
     log_level = args.log_level or cfg.get("global", "log_level", fallback="INFO")
     setup_logging(log_level)
+
+    ensure_nbd_module_loaded()
 
     client = NbdPnpcClient(args.config)
 
