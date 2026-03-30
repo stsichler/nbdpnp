@@ -511,7 +511,8 @@ class RemoteServerWorker:
                 sub.mounted = True
             else:
                 sub.mounted = False
-        except Exception:
+        except Exception as exc:
+            LOG.error("Failed to connect to %s/%s: %s", self.name, sub.export_name, exc)
             self._cleanup_subscription(sub)
             raise
 
