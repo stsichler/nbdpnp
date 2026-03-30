@@ -1,6 +1,6 @@
 # nbdpnp
 
-*NOTE: Parts of this project were generated with the help of AI tools.*
+*NOTE: Most parts of this project were generated with the help of AI tools.*
 
 This project adds plug-and-play functionality to nbd-server, making it particularly suitable for sharing optical drives with removable media, such as CD/DVD or Blu-ray drives, with one or more client computers. 
 This is achieved through two Python 3 services:
@@ -33,11 +33,11 @@ This is achieved through two Python 3 services:
 
 ### Client Side
 
-- `nbd-client`
-- `udisksctl` from `udisks2`
-- `modprobe`
+- `modprobe` from `kmod`
 - `mount`, `umount`
+- `nbd-client`
 - `udevadm` from `udev`
+- `udisksctl` from `udisks2`
 
 ## Notes
 
