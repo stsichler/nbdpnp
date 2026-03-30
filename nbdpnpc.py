@@ -412,6 +412,9 @@ def unmount_device(device: Optional[str], actual_mountpoint: Optional[str], bind
     nbd_disconnect(device)
 
 
+PING_INTERVAL = 5.0
+PING_TIMEOUT = 15.0
+
 class RemoteServerWorker:
     def __init__(self, name: str, host: str, port: int, retry_interval: float, subscriptions: List[SubscriptionState], stop_event: threading.Event) -> None:
         self.name = name
@@ -422,6 +425,8 @@ class RemoteServerWorker:
         self.stop_event = stop_event
         self.sock: Optional[socket.socket] = None
         self.fp = None
+        self._last_pong = 0.0
+        self._last_ping = 0.0
 
     def close_socket(self) -> None:
         try:
@@ -439,6 +444,7 @@ class RemoteServerWorker:
 
     def connect(self) -> None:
         self.sock = socket.create_connection((self.host, self.port), timeout=20)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         self.fp = self.sock.makefile("rwb")
         send_json_line(
             self.fp,
@@ -470,6 +476,9 @@ class RemoteServerWorker:
                 self.apply_state(sub, present)
 
         self.sock.settimeout(None)
+        now = now_ts()
+        self._last_pong = now
+        self._last_ping = now
 
     def _cleanup_subscription(self, sub: SubscriptionState) -> None:
         cleanup_subscription(sub)
@@ -509,21 +518,24 @@ class RemoteServerWorker:
             self.ensure_absent(sub)
 
     def handle_event(self, msg: dict) -> None:
-        if msg.get("type") != "change":
-            return
-        export = msg.get("export")
-        if export not in self.subscriptions:
-            return
-        present = bool(msg.get("present", False))
-        sub = self.subscriptions[export]
-        msg_port = msg.get("port")
-        if isinstance(msg_port, int) and msg_port > 0:
-            sub.port = msg_port
-        LOG.info("Received change for %s/%s: present=%s, port=%s", self.name, export, present, sub.port)
-        if present:
-            self.ensure_present(sub)
-        else:
-            self.ensure_absent(sub)
+        typ = msg.get("type")
+        if typ == "change":
+            export = msg.get("export")
+            if export not in self.subscriptions:
+                return
+            present = bool(msg.get("present", False))
+            sub = self.subscriptions[export]
+            msg_port = msg.get("port")
+            if isinstance(msg_port, int) and msg_port > 0:
+                sub.port = msg_port
+            LOG.info("Received change for %s/%s: present=%s, port=%s", self.name, export, present, sub.port)
+            if present:
+                self.ensure_present(sub)
+            else:
+                self.ensure_absent(sub)
+        elif typ == "pong":
+            self._last_pong = now_ts()
+            LOG.debug("Received pong from server %s", self.name)
 
     def run(self) -> None:
         was_connected = False
@@ -535,9 +547,16 @@ class RemoteServerWorker:
                     sub.connected = True
                 while not self.stop_event.is_set():
                     assert self.sock is not None
+                    now = now_ts()
+                    if (now - self._last_ping) >= PING_INTERVAL:
+                        send_json_line(self.fp, {"type": "ping", "timestamp": now})
+                        self._last_ping = now
+                    if self._last_pong and (now - self._last_pong) >= PING_TIMEOUT:
+                        raise ConnectionError("Server unresponsive (ping timeout)")
                     r, _, _ = select.select([self.sock], [], [], 1.0)
                     if not r:
                         continue
+
                     msg = recv_json_line(self.fp)
                     if msg is None:
                         raise ConnectionError("Server closed the connection")
