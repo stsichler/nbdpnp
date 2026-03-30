@@ -415,6 +415,10 @@ def unmount_device(device: Optional[str], actual_mountpoint: Optional[str], bind
 PING_INTERVAL = 5.0
 PING_TIMEOUT = 15.0
 
+class ServerByeError(ConnectionError):
+    """Raised when the server sent a graceful bye and closed the connection."""
+
+
 class RemoteServerWorker:
     def __init__(self, name: str, host: str, port: int, retry_interval: float, subscriptions: List[SubscriptionState], stop_event: threading.Event) -> None:
         self.name = name
@@ -536,6 +540,14 @@ class RemoteServerWorker:
         elif typ == "pong":
             self._last_pong = now_ts()
             LOG.debug("Received pong from server %s", self.name)
+        elif typ == "bye":
+            LOG.info("Received bye from server %s", self.name)
+            for sub in self.subscriptions.values():
+                try:
+                    self.ensure_absent(sub)
+                except Exception as exc:
+                    LOG.debug("Cleanup failed for %s on bye: %s", sub.export_name, exc)
+            raise ServerByeError("Server requested disconnect via bye")
 
     def run(self) -> None:
         was_connected = False
@@ -562,7 +574,7 @@ class RemoteServerWorker:
                         raise ConnectionError("Server closed the connection")
                     self.handle_event(msg)
             except Exception as exc:
-                if was_connected and not self.stop_event.is_set():
+                if was_connected and not self.stop_event.is_set() and not isinstance(exc, ServerByeError):
                     LOG.warning("Server %s connection lost: %s", self.name, exc)
                 for sub in self.subscriptions.values():
                     try:

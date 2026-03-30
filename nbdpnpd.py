@@ -163,6 +163,11 @@ class ClientConnection:
     def close(self) -> None:
         if not self.alive:
             return
+        try:
+            # Inform the client that the server is closing the connection.
+            self.send({"type": "bye", "server_time": now_ts()})
+        except Exception:
+            pass
         self.alive = False
         try:
             self.fp.close()
@@ -354,6 +359,13 @@ class NbdPnpdServer:
             thread = threading.Thread(target=client.handle, name=f"nbdpnpd-client-{addr[0]}:{addr[1]}", daemon=True)
             thread.start()
 
+    def shutdown(self) -> None:
+        # Send bye to all connected clients and close them.
+        with self.clients_lock:
+            clients = list(self.clients)
+        for client in clients:
+            client.close()
+
     def run(self) -> int:
         self.listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -367,6 +379,7 @@ class NbdPnpdServer:
             self.accept_loop()
         finally:
             self.stop_event.set()
+            self.shutdown()
             try:
                 self.listen_sock.close()
             except Exception:
