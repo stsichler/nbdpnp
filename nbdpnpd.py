@@ -52,6 +52,10 @@ def recv_json_line(fp) -> Optional[dict]:
     return json.loads(line.decode("utf-8"))
 
 
+#PING_INTERVAL = 5.0
+PING_TIMEOUT = 15.0
+
+
 def path_for_device(device: str) -> str:
     if device.startswith("/dev/"):
         return device
@@ -151,6 +155,10 @@ def media_present(device: str) -> bool:
     return False
 
 
+class ClientByeError(Exception):
+    """Raised when the client closes the connection gracefully via bye."""
+
+
 class ClientConnection:
     def __init__(self, sock: socket.socket, server: "NbdPnpdServer") -> None:
         self.sock = sock
@@ -158,6 +166,7 @@ class ClientConnection:
         self.fp = sock.makefile("rwb")
         self.subscriptions: set[str] = set()
         self.alive = True
+        self.last_ping = now_ts()
         self.lock = threading.Lock()
 
     def close(self) -> None:
@@ -228,17 +237,56 @@ class ClientConnection:
 
             self.sock.settimeout(None)
             while self.alive and not self.server.stop_event.is_set():
+                now = now_ts()
+                if (now - self.last_ping) > PING_TIMEOUT:
+                    client_addr = None
+                    try:
+                        client_addr = self.sock.getpeername()
+                        if isinstance(client_addr, tuple) and len(client_addr) >= 2:
+                            client_addr = f"{client_addr[0]}:{client_addr[1]}"
+                    except Exception:
+                        pass
+                    LOG.warning("Client %s ping timeout, closing", client_addr or "unknown")
+                    break
+
                 r, _, _ = select.select([self.sock], [], [], 1.0)
                 if not r:
                     continue
                 msg = recv_json_line(self.fp)
                 if msg is None:
                     break
-                if msg.get("type") == "ping":
+
+                typ = msg.get("type")
+                if typ == "ping":
+                    self.last_ping = now
                     self.send({"type": "pong", "server_time": now_ts()})
+                elif typ == "bye":
+                    peer = None
+                    try:
+                        peer = self.sock.getpeername()
+                    except Exception:
+                        pass
+                    raise ClientByeError("Client requested disconnect via bye")
+        except ClientByeError:
+            pass
         except Exception as exc:
-            LOG.debug("Client connection ended: %s", exc)
+            client_addr = None
+            try:
+                client_addr = self.sock.getpeername()
+                if isinstance(client_addr, tuple) and len(client_addr) >= 2:
+                    client_addr = f"{client_addr[0]}:{client_addr[1]}"
+            except Exception:
+                pass
+            LOG.warning("Client %s connection lost: %s", client_addr or "unknown", exc)
         finally:
+            client_addr = None
+            try:
+                client_addr = self.sock.getpeername()
+                if isinstance(client_addr, tuple) and len(client_addr) >= 2:
+                    client_addr = f"{client_addr[0]}:{client_addr[1]}"
+            except Exception:
+                pass
+            LOG.info("Client %s connection closed", client_addr or "unknown")
             self.server.unregister_client(self)
             self.close()
 
@@ -325,7 +373,6 @@ class NbdPnpdServer:
         monitor.filter_by(subsystem="block")
         observer = pyudev.MonitorObserver(monitor, callback=self._udev_callback, name="nbdpnpd-udev")
         observer.start()
-        LOG.info("pyudev monitor started")
         while not self.stop_event.is_set():
             time.sleep(0.5)
 

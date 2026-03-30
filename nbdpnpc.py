@@ -435,6 +435,10 @@ class RemoteServerWorker:
     def close_socket(self) -> None:
         try:
             if self.fp:
+                try:
+                    send_json_line(self.fp, {"type": "bye", "timestamp": now_ts()})
+                except Exception:
+                    pass
                 self.fp.close()
         except Exception:
             pass
