@@ -1,5 +1,5 @@
 # nbdpnpc.conf
-[DEFAULT]
+[global]
 log_level = INFO
 
 [server "main"]

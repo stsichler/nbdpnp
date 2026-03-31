@@ -31,7 +31,7 @@ def setup_logging(level: str = "INFO") -> None:
 
 
 def read_config(path: str) -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None)
+    parser = configparser.ConfigParser(default_section="global", interpolation=None)
     with open(path, "r", encoding="utf-8") as fh:
         parser.read_file(fh)
     return parser

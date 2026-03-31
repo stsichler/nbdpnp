@@ -1,5 +1,5 @@
 # nbdpnpd.conf
-[DEFAULT]
+[global]
 log_level = INFO
 listen_host = 0.0.0.0 # optional
 listen_port = 10800

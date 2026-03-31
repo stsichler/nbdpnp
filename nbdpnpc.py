@@ -32,7 +32,7 @@ def setup_logging(level: str = "INFO") -> None:
 
 
 def read_config(path: str) -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None)
+    parser = configparser.ConfigParser(default_section="global", interpolation=None)
     with open(path, "r", encoding="utf-8") as fh:
         parser.read_file(fh)
     return parser
@@ -371,6 +371,7 @@ def mount_device(device: str, mountpoint: Optional[str]) -> tuple[Optional[str],
     if mountpoint:
         ensure_dir(mountpoint)
 
+    LOG.debug("Mounting %s via udisksctl", device)
     result = run_cmd(
         ["udisksctl", "mount", "-b", device, "--no-user-interaction"],
         check=True,
@@ -382,7 +383,10 @@ def mount_device(device: str, mountpoint: Optional[str]) -> tuple[Optional[str],
     if actual is None:
         raise RuntimeError(f"Could not determine mount path from udisksctl output: {result.stdout!r}")
 
+    LOG.info("Mounted %s to %s", device, actual)
+
     if mountpoint and os.path.realpath(actual) != os.path.realpath(mountpoint):
+        LOG.info("Binding mountpoint %s to %s", mountpoint, actual)
         if is_mounted(mountpoint):
             try:
                 umount_path(mountpoint)
