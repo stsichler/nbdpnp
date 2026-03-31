@@ -190,7 +190,8 @@ class SubscriptionState:
     auto_mount: bool = True
     retry_interval: float = 10.0
     device_ready_timeout: float = 10.0
-    connected: bool = False
+    server_connected: bool = False
+    nbd_connected: bool = False
     mounted: bool = False
     actual_mountpoint: Optional[str] = None
     bind_mountpoint: Optional[str] = None
@@ -321,7 +322,8 @@ def cleanup_subscription(sub: SubscriptionState) -> None:
     finally:
         ALLOCATOR.release(sub.device)
         sub.device = None
-        sub.connected = False
+        sub.server_connected = False
+        sub.nbd_connected = False
         sub.mounted = False
         sub.actual_mountpoint = None
         sub.bind_mountpoint = None
@@ -501,14 +503,31 @@ class RemoteServerWorker:
             LOG.info("Allocated %s for %s/%s", sub.device, self.name, sub.export_name)
 
         try:
-            if not sub.connected:
-                nbd_connect(sub.host, sub.port, sub.device, sub.export_name)
-                sub.connected = True
+            if not sub.nbd_connected:
+                attempts = 0
+                max_attempts = 4
+                while True:
+                    nbd_connect(sub.host, sub.port, sub.device, sub.export_name)
+                    time.sleep(0.5)
+                    attempts += 1
+                    try:
+                        wait_for_nbd_device_ready(sub.device, timeout=sub.device_ready_timeout)
+                        break
+                    except TimeoutError as exc:
+                        LOG.warning(
+                            "NBD device %s not ready (attempt %d/%d): %s",
+                            sub.device,
+                            attempts,
+                            max_attempts,
+                            exc,
+                        )
+                        if attempts >= max_attempts:
+                            raise
+                sub.nbd_connected = True
 
             if sub.auto_mount:
                 if sub.mounted and (sub.actual_mountpoint or sub.bind_mountpoint):
                     return
-                wait_for_nbd_device_ready(sub.device, timeout=sub.device_ready_timeout)
                 actual, bind = mount_device(sub.device, sub.mountpoint)
                 sub.actual_mountpoint = actual
                 sub.bind_mountpoint = bind
@@ -521,7 +540,7 @@ class RemoteServerWorker:
             raise
 
     def ensure_absent(self, sub: SubscriptionState) -> None:
-        if sub.mounted or sub.connected or sub.device is not None:
+        if sub.mounted or sub.nbd_connected or sub.server_connected or sub.device is not None:
             self._cleanup_subscription(sub)
 
     def apply_state(self, sub: SubscriptionState, present: bool) -> None:
@@ -565,7 +584,7 @@ class RemoteServerWorker:
                 self.connect()
                 was_connected = True
                 for sub in self.subscriptions.values():
-                    sub.connected = True
+                    sub.server_connected = True
                 while not self.stop_event.is_set():
                     assert self.sock is not None
                     now = now_ts()
@@ -596,7 +615,7 @@ class RemoteServerWorker:
                     time.sleep(self.retry_interval)
             finally:
                 for sub in self.subscriptions.values():
-                    sub.connected = False
+                    sub.server_connected = False
                 self.close_socket()
 
 
